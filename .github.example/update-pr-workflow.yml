@@ -1,0 +1,140 @@
+name: PR Comment Workflow
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  update-pr:
+    if: |
+      github.event.issue.pull_request && 
+      contains(github.event.comment.body, format('@{0}', vars.CARBON_BOT_NAME)) &&
+      github.actor != vars.CARBON_BOT_NAME
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Create response comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: [
+                'Thanks for your comment! Carbon AI is starting to work on it. 🚀'
+              ].join('\n')
+            })
+
+      - name: Get PR details
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            
+            const headRef = pr.data.head.ref;
+            core.exportVariable('HEAD_REF', headRef);
+
+      - name: Checkout Carbon AI
+        uses: actions/checkout@v4
+        with:
+          repository: dealancer/carbon-cli
+          path: carbon-cli
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd carbon-cli
+          pip install -r requirements.txt
+          cd ..
+
+      - name: Checkout project repository
+        uses: actions/checkout@v4
+        with:
+          path: codebase
+          ref: ${{ env.HEAD_REF }}
+
+      - name: Run Carbon CLI
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+          AWS_BUCKET: ${{ vars.AWS_BUCKET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CARBON_PROJECT: ${{ github.repository }}
+          CARBON_MODEL: ${{ vars.CARBON_MODEL }}
+          CARBON_INSTRUCTIONS: ${{ vars.CARBON_INSTRUCTIONS }}
+          CARBON_WORK_DIR: .
+          CARBON_PROJECT_FILENAME: codebase.zip
+          CARBON_META_FILENAME: meta.json
+          CARBON_PR_ID: ${{ github.event.issue.number }}
+          CARBON_REQUEST: |
+            ${{ github.event.comment.body }}
+        run: |
+          python carbon-cli/src/run.py update pr
+
+      - name: Unzip modified codebase
+        run: |
+          unzip -o codebase.zip
+          echo "Unzipped codebase.zip archive"
+
+      - name: Get commit message and summary of changes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const metaContent = fs.readFileSync('meta.json', 'utf8');
+            const meta = JSON.parse(metaContent);
+
+            const commitMessage = meta.commit_message || '';
+            const extendedDetails = meta.extended_details || '';
+
+            core.exportVariable('COMMIT_MESSAGE', commitMessage);
+            core.exportVariable('EXTENDED_DETAILS', extendedDetails);
+
+      - name: Configure Git
+        run: |
+          git config --global user.name '${{ vars.CARBON_BOT_NAME }}'
+          git config --global user.email '${{ vars.CARBON_BOT_EMAIL }}'
+
+      - name: Commit and push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          cd codebase
+          git checkout ${{ env.PR_BRANCH }}
+          git add .
+          git commit -m "Carbon AI: ${{ env.COMMIT_MESSAGE }}"
+          git push origin ${{ env.PR_BRANCH }}
+
+      - name: Create commit comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const commentBody = [
+              `Carbon AI has committed changes to the branch \`${process.env.HEAD_REF}\`. ✒️`,
+              `\n\n`,
+              process.env.EXTENDED_DETAILS
+            ].filter(Boolean).join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            })
+
