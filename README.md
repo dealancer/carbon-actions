@@ -1,6 +1,6 @@
 # Carbon Actions
 
-Carbon Actions is an experimental vibe coding GitHub actions that work in pair with [Carbon CLI](https://github.com/dealancer/carbon-cli). It uses OpenAI API to generate code and AWS S3 bucket to store data.
+Carbon Actions is an experimental vibe coding GitHub actions that work in pair with [Carbon CLI](https://github.com/dealancer/carbon-cli) (it uses OpenAI API to generate code and AWS S3 bucket to store data).
 
 ## Usage
 
